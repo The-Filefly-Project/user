@@ -19,25 +19,24 @@ interface AccountDBSettings {
     }
     /** Password security */
     password: {
-        minPasswordLength: number
-        useSpecialCharacters: boolean
-        useNumbers: boolean
+        minPasswordLength:      number
+        useSpecialCharacters:   boolean
+        useNumbers:             boolean
         useBigAndLittleSymbols: boolean
-        saltRounds: number
+        saltRounds:             number
     }
 }
 
 interface UserAccount {
-    name: string
-    pass: string
-    uuid: string
-    root: boolean
-    createdISO: string
+    name:         string
+    pass:         string
+    uuid:         string
+    root:         boolean
+    createdISO:   string
     lastLoginISO: "never" | (string & {})
 }
 
-
-// Used internally in the database. "username" is added when needed.
+// Used internally in the database. "name" is added when needed.
 type UserAccountEntry = Omit<UserAccount, 'name'>
 
 interface UserPreferences {
@@ -142,8 +141,9 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
             }
             
             const pwdHash = await bcrypt.hash(user.pass, this.settings.password.saltRounds)
-            const userID  = await this._getUniqueUUID(user.name)
             const created = new Date().toISOString()
+            const [idError, userID]  = await this._getUniqueUUID(user.name)
+            if (idError) return idError
 
             await this.slAccounts.put(user.name, {
                 pass: pwdHash,
@@ -166,14 +166,19 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
      * Returns a list of all existing user accounts.
      * @returns Account entries array
      */
-    public async listAccountEntries(): Promise<UserAccount[]> {
-        const users: UserAccount[] = []
-        for await (const name of this.slAccounts.keys()) {
-            const user = await this.slAccounts.get(name) as UserAccount
-            user.name = name
-            users.push(user)
+    public async listAccountEntries(): EavAsync<UserAccount[]> {
+        try {
+            const users: UserAccount[] = []
+            for await (const name of this.slAccounts.keys()) {
+                const user = await this.slAccounts.get(name) as UserAccount
+                user.name = name
+                users.push(user)
+            }
+            return [undefined, users]
+        } 
+        catch (error) {
+            return [error as Error, undefined]
         }
-        return users
     }
 
     /**
@@ -215,11 +220,17 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
 
     // Utility methods ========================================================
 
-    private async _getUniqueUUID(username: string): Promise<string> {
-        const id = `${username}.${crypto.randomUUID()}`
-        const accounts = await this.listAccountEntries()
-        if (accounts.find(x => x.uuid === id)) return await this._getUniqueUUID(username)
-        return id
+    private async _getUniqueUUID(username: string): EavAsync<string> {
+        try {
+            const id = `${username}.${crypto.randomUUID()}`
+            const [acErr, accounts] = await this.listAccountEntries()
+            if (acErr) return [acErr, undefined]
+            if (accounts.find(x => x.uuid === id)) return await this._getUniqueUUID(username)
+            return [undefined, id]
+        } 
+        catch (error) {
+            return [error as Error, undefined]
+        }
     }
 
 

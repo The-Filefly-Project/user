@@ -4,7 +4,7 @@
     ],
     "include": [
         "./src"
-    ],
+, "_.d.ts"    ],
     "compilerOptions": {
 
         /* Base Options: */

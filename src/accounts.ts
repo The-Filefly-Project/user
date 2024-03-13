@@ -50,19 +50,15 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
     public  declare db:            Level<string, never>
     private declare slAccounts:    AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserAccountEntry>
     private declare slPreferences: AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserPreferences>
-    private declare settings:      AccountDBSettings
 
     public scope = import.meta.url
 
-    private constructor() { super() }
+    constructor(private settings: AccountDBSettings) { super() }
 
     /** 
      * Opens the database.
      */
-    public static async open(settings: AccountDBSettings) {
-
-        const self = new this()
-        self.settings = settings
+    public async open() {
 
         const dbOptions: DatabaseOptions<string, never> = {
             keyEncoding: 'utf-8',
@@ -74,31 +70,31 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
         }
 
 
-        self.emit('info', 'Opening database.')
+        this.emit('info', 'Opening database.')
         
-        self.db            = new Level(settings.storageLocation, dbOptions)
-        self.slAccounts    = self.db.sublevel<string, UserAccountEntry>('account', slOptions)
-        self.slPreferences = self.db.sublevel<string, UserPreferences>('pref', slOptions)
+        this.db            = new Level(this.settings.storageLocation, dbOptions)
+        this.slAccounts    = this.db.sublevel<string, UserAccountEntry>('account', slOptions)
+        this.slPreferences = this.db.sublevel<string, UserPreferences>('pref', slOptions)
 
         // Wait till the DB is open and prevent server startup if it's misbehaving.
-        await new Promise<void>((rs, rj) => self.db.defer(() => {
-            if (self.db.status === 'closed') rj(new Error('User database got closed mid-initialization.'))
+        await new Promise<void>((rs, rj) => this.db.defer(() => {
+            if (this.db.status === 'closed') rj(new Error('User database got closed mid-initialization.'))
             else rs()
         }))
 
-        self.emit('info', 'Database opened.')
+        this.emit('info', 'Database opened.')
 
-        if ((await self.listUsers()).length === 0) {
-            await self.create({
+        if ((await this.listUsers()).length === 0) {
+            await this.create({
                 name: 'admin',
                 pass: 'admin',
                 root: true
             })
         }
 
-        self.emit('critical', '!! IMPORTANT !! A default administrator account was created with username "admin" and password "admin". Update the password immediately!')
+        this.emit('critical', '!! IMPORTANT !! A default administrator account was created with username "admin" and password "admin". Update the password immediately!')
 
-        return self
+        return this
 
     }
 

@@ -9,7 +9,6 @@ import 'type-utils'
 const __filename = url.fileURLToPath(import.meta.url)
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 
-
 afterAll(async () => {
     fs.rm(path.join(__dirname, './temp/'), { recursive: true })
 })
@@ -41,16 +40,16 @@ describe('Account creation', async () => {
     })
         
     await ac.open()
-
-    describe('password strength checks', () => {
+ 
+    describe('create + password strength checks', async () => {
 
         test('skip checks', async () => {
-            const result = await ac.create({ name: name(), pass: 'user', root: true }, true)
+            const result = await ac.create({ name: name(), pass: 'user', root: false }, true)
             expect(result).toBe(undefined)
         })
 
         test("bad password, don't skip checks", async () => {
-            const result = await ac.create({ name: name(), pass: 'user', root: true })
+            const result = await ac.create({ name: name(), pass: 'user', root: false })
             expect(result).toBeDefined()
         })
 
@@ -62,33 +61,77 @@ describe('Account creation', async () => {
         })
 
         test("password use numbers", async () => {
-            const none = await ac.create({ name: name(), pass: 'creativePassword', root: true })
-            const nums = await ac.create({ name: name(), pass: 'creativePassword1', root: true })
+            const none = await ac.create({ name: name(), pass: 'creativePassword', root: false })
+            const nums = await ac.create({ name: name(), pass: 'creativePassword1', root: false })
             expect(none).toBe('ERR_PASS_NO_NUMS')
             expect(nums).not.toBe('ERR_PASS_NO_NUMS')
         })
 
         test("password big chars", async () => {
-            const small = await ac.create({ name: name(), pass: 'creativepassword1', root: true })
-            const big   = await ac.create({ name: name(), pass: 'creativePassword1', root: true })
+            const small = await ac.create({ name: name(), pass: 'creativepassword1', root: false })
+            const big   = await ac.create({ name: name(), pass: 'creativePassword1', root: false })
             expect(small).toBe('ERR_PASS_NO_BIG_CHARS')
             expect(big).not.toBe('ERR_PASS_NO_BIG_CHARS')
         })
 
         test("password small chars", async () => {
-            const big   = await ac.create({ name: name(), pass: 'CREATIVEPASSWORD1', root: true })
-            const small = await ac.create({ name: name(), pass: 'creativePassword1', root: true })
+            const big   = await ac.create({ name: name(), pass: 'CREATIVEPASSWORD1', root: false })
+            const small = await ac.create({ name: name(), pass: 'creativePassword1', root: false })
             expect(big).toBe('ERR_PASS_NO_SMALL_CHARS')
             expect(small).not.toBe('ERR_PASS_NO_SMALL_CHARS')
         })
 
         test("password special chars", async () => {
-            const normal  = await ac.create({ name: name(), pass: 'CreativePassword1', root: true })
-            const special = await ac.create({ name: name(), pass: 'CreativePassword1$', root: true })
+            const normal  = await ac.create({ name: name(), pass: 'CreativePassword1', root: false })
+            const special = await ac.create({ name: name(), pass: 'CreativePassword1$', root: false })
             expect(normal).toBe('ERR_PASS_NO_SPECIAL_CHARS')
             expect(special).not.toBe('ERR_PASS_NO_SPECIAL_CHARS')
         })
+        
+    })
+
+    describe('delete', async () => {
+
+        test('try deleting last admin', async () => {
+            const result = await ac.delete('admin')
+            expect(result).toBe('ERR_CANT_DEL_LAST_ADMIN')
+        })
+
+        test('try deleting NOT a admin', async () => {
+            await ac.create({ name: 'admin2', pass: 'admin2', root: true }, true)
+            const result = await ac.delete('admin')
+            expect(result).toBe(undefined)
+        })
 
     })
+
+    test('list account entries', async () => {
+        const [err, result] = await ac.listAccountEntries()
+        const names = result?.map(x => x.name)
+        expect(err).toBe(undefined)
+        expect(names?.includes('admin')).toBe(false)
+        expect(names?.includes('admin2')).toBe(true)
+    })
+
+    test('list users (usernames)', async () => {
+        const users = await ac.listUsers()
+        expect(users.includes('admin')).toBe(false)
+        expect(users.includes('admin2')).toBe(true)
+    })
+
+    describe('get', () => {
+
+        test('get user', async () => {
+            const user = await ac.get('admin2')
+            expect(user?.name).toBe('admin2')
+        })
+
+        test('get user (expect error)', async () => {
+            const user = await ac.get('admin123')
+            expect(user?.name).toBe(undefined)
+        })
+
+    })
+
 
 })

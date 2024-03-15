@@ -33,7 +33,7 @@ interface UserAccount {
     uuid:         string
     root:         boolean
     createdISO:   string
-    lastLoginISO: "never" | (string & {})
+    lastLoginISO: null | string
 }
 
 // Used internally in the database. "name" is added when needed.
@@ -47,9 +47,9 @@ interface UserPreferences {
 
 export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implements LogEventCapable {
 
-    public  declare db:            Level<string, never>
-    private declare slAccounts:    AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserAccountEntry>
-    private declare slPreferences: AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserPreferences>
+    public declare db:            Level<string, never>
+    public declare slAccounts:    AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserAccountEntry>
+    public declare slPreferences: AbstractSublevel<typeof this.db, string | Buffer | Uint8Array, string, /* type */ UserPreferences>
 
     public scope = import.meta.url
 
@@ -59,43 +59,50 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
      * Opens the database.
      */
     public async open() {
+        try {
 
-        const dbOptions: DatabaseOptions<string, never> = {
-            keyEncoding: 'utf-8',
-            valueEncoding: 'json'
-        }
-        const slOptions: AbstractSublevelOptions<string, any> = {
-            keyEncoding: 'utf-8',
-            valueEncoding: 'json'
-        }
+            this.emit('info', 'Opening database.')
+
+            const dbOptions: DatabaseOptions<string, never> = {
+                keyEncoding: 'utf-8',
+                valueEncoding: 'json'
+            }
+            const slOptions: AbstractSublevelOptions<string, any> = {
+                keyEncoding: 'utf-8',
+                valueEncoding: 'json'
+            }
+            
+            this.db            = new Level(this.settings.storageLocation, dbOptions)
+            this.slAccounts    = this.db.sublevel<string, UserAccountEntry>('account', slOptions)
+            this.slPreferences = this.db.sublevel<string, UserPreferences>('pref', slOptions)
+            
+            // Wait till the DB is open and prevent server startup if it's misbehaving.
+            await new Promise<void>((rs, rj) => this.db.defer(() => {
+                if (this.db.status === 'closed') rj(new Error('User database got closed mid-initialization.'))
+                else rs()
+            }))
+
+            this.emit('info', 'Database opened.')
 
 
-        this.emit('info', 'Opening database.')
+            // Create the default administrator account
+            const [usersError, users] = await this.listAccountEntries()
+            if (usersError) return usersError
         
-        this.db            = new Level(this.settings.storageLocation, dbOptions)
-        this.slAccounts    = this.db.sublevel<string, UserAccountEntry>('account', slOptions)
-        this.slPreferences = this.db.sublevel<string, UserPreferences>('pref', slOptions)
+            if (users.filter(x => x.root).length === 0) {
+                const err = await this.create({
+                    name: 'admin',
+                    pass: 'admin',
+                    root: true
+                }, true)
+                if (err) return err as Error
+                this.emit('critical', '!! IMPORTANT !! A default administrator account was created with username "admin" and password "admin". Update the password immediately!')
+            }
 
-        // Wait till the DB is open and prevent server startup if it's misbehaving.
-        await new Promise<void>((rs, rj) => this.db.defer(() => {
-            if (this.db.status === 'closed') rj(new Error('User database got closed mid-initialization.'))
-            else rs()
-        }))
-
-        this.emit('info', 'Database opened.')
-
-        if ((await this.listUsers()).length === 0) {
-            await this.create({
-                name: 'admin',
-                pass: 'admin',
-                root: true
-            })
+        } 
+        catch (error) {
+            return error as Error
         }
-
-        this.emit('critical', '!! IMPORTANT !! A default administrator account was created with username "admin" and password "admin". Update the password immediately!')
-
-        return this
-
     }
 
     /**
@@ -146,7 +153,7 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
                 uuid: userID,
                 root: user.root,
                 createdISO: created,
-                lastLoginISO: 'never'
+                lastLoginISO: null
             })
 
             this.emit('notice', `AccountStore.create() call succeeded | user:${user.name}, root:${user.root}, uuid:${userID}`)
@@ -175,9 +182,9 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
 
             // Check if the username doesn't belong to the last admin account
             // and prevent cases where there wouldn't be any admin accounts at all.
-            const [listError, userList] = await this.listAccountEntries()
-            if (listError) return listError
-            const admins = userList.filter(x => x.root)
+            const [usersError, users] = await this.listAccountEntries()
+            if (usersError) return usersError
+            const admins = users.filter(x => x.root)
             if (admins.length === 1 && admins[0]!.name === name) return 'ERR_CANT_DEL_LAST_ADMIN'
 
             this.slAccounts.del(name)
@@ -186,6 +193,7 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
             
         } 
         catch (error) {
+            this.emit('error', `Account.delete() error:`, error)
             return error as Error
         }
     }
@@ -236,12 +244,12 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
     /**
      * Returns a `boolean` indicating whether the user of a given name exists.
      */
-    public async exists(name: string): Promise<boolean> {
+    public async exists(name: string){
         try {
             await this.slAccounts.get(name)
-            return true    
+            return true  
         } 
-        catch {
+        catch (error) {
             return false
         }
     }
@@ -251,9 +259,9 @@ export class AccountStore extends EventEmitter<Record<LogLevel, any[]>> implemen
     private async _getUniqueUUID(username: string): EavAsync<string> {
         try {
             const id = `${username}.${crypto.randomUUID()}`
-            const [acErr, accounts] = await this.listAccountEntries()
-            if (acErr) return [acErr, undefined]
-            if (accounts.find(x => x.uuid === id)) return await this._getUniqueUUID(username)
+            const [usersError, users] = await this.listAccountEntries()
+            if (usersError) return [usersError, undefined]
+            if (users.find(x => x.uuid === id)) return await this._getUniqueUUID(username)
             return [undefined, id]
         } 
         catch (error) {

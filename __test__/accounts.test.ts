@@ -22,7 +22,7 @@ const name = () => Math.floor(Math.random() * 10000000).toString()
     + Math.floor(Math.random() * 10000000).toString()
 
 
-describe('Account creation', async () => {
+describe('Account management', async () => {
 
     const ac = new AccountStore({
         storageLocation: path.join(__dirname, './temp'),
@@ -41,7 +41,7 @@ describe('Account creation', async () => {
         
     await ac.open()
  
-    describe('create + password strength checks', async () => {
+    describe('create() + password strength checks', async () => {
 
         test('skip checks', async () => {
             const result = await ac.create({ name: name(), pass: 'user', root: false }, true)
@@ -90,14 +90,14 @@ describe('Account creation', async () => {
         
     })
 
-    describe('delete', async () => {
+    describe('delete()', async () => {
 
         test('try deleting last admin', async () => {
             const result = await ac.delete('admin')
             expect(result).toBe('ERR_CANT_DEL_LAST_ADMIN')
         })
 
-        test('try deleting NOT a admin', async () => {
+        test('try deleting non-admin', async () => {
             await ac.create({ name: 'admin2', pass: 'admin2', root: true }, true)
             const result = await ac.delete('admin')
             expect(result).toBe(undefined)
@@ -105,7 +105,7 @@ describe('Account creation', async () => {
 
     })
 
-    test('list account entries', async () => {
+    test('listAccountEntries()', async () => {
         const [err, result] = await ac.listAccountEntries()
         const names = result?.map(x => x.name)
         expect(err).toBe(undefined)
@@ -113,13 +113,13 @@ describe('Account creation', async () => {
         expect(names?.includes('admin2')).toBe(true)
     })
 
-    test('list users (usernames)', async () => {
+    test('listUsers() (usernames)', async () => {
         const users = await ac.listUsers()
         expect(users.includes('admin')).toBe(false)
         expect(users.includes('admin2')).toBe(true)
     })
 
-    describe('get', () => {
+    describe('get()', () => {
 
         test('get user', async () => {
             const user = await ac.get('admin2')

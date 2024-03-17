@@ -23,21 +23,20 @@ interface SessionEntry {
     uuid: string
     /** Specifies whether the session belongs to a root user. */
     root: boolean
-    /** 
-     * Specifies whether the session has been elevated and has true root access.
-     * For security, root sessions don't immediately have actual root privileges, 
-     * the user must provide the password a second time to elevate it, after which 
-     * it will quickly expire.
-     */
-    elevated: boolean
     /** Time of session's creation in ISO format. */
     createdISO: string
     /** Time of last session update or renewal in ISO format. */
     updatedISO: string
     /** 
      * Type of the session.  
-     * hort sessions last a few hours, long sessions could
-     * last months, and elevated sessions only last for a few minutes, as they have root access.
+     * Short sessions last a few hours, long sessions could last months, 
+     * and elevated sessions only last for a few minutes, as they have root access.
+     * 
+     * For security, root sessions don't immediately have actual root privileges, 
+     * the user must provide the password a second time to elevate it, after which 
+     * it will quickly expire. This is to prevent unauthorized users from gaining
+     * administrator access through the access of the administrator's device, where
+     * he/she might have logged in using the long session option.
      */
     type: "short" | "long" | "elevated"
 }
@@ -47,9 +46,6 @@ interface SessionEntry {
 export class SessionStore extends EventEmitter<Record<LogLevel, any[]>> implements LogEventCapable {
 
     public scope = import.meta.url
-
-    private declare settings: SessionStoreSettings
-    private declare accounts: AccountStore
 
     // Session storage
     private cache = new Map<string, SessionEntry>()
@@ -61,15 +57,15 @@ export class SessionStore extends EventEmitter<Record<LogLevel, any[]>> implemen
     // Session ID byte-size
     private sidLength = 64
 
-    private constructor() { super() }
+    constructor(private accounts: AccountStore, private settings: SessionStoreSettings) { 
+        super() 
+        this.sct = setInterval(() => {
+            this._clearOldSessions()
+        }, this.sci)
+    }
 
-    public static async open(accountStore: AccountStore, settings: SessionStoreSettings) {
-        const self = new this()
-        self.settings = settings
-        self.accounts = accountStore
-        self.sct = setInterval(() => {
-            self._clearOldSessions()
-        }, self.sci)
+    public get(name: string) {
+        return this.cache.get(name)
     }
 
     /**
@@ -90,15 +86,16 @@ export class SessionStore extends EventEmitter<Record<LogLevel, any[]>> implemen
             if (!doPasswordsMatch) return ['WRONG_PASS_OR_NAME', undefined]
 
             const [SIDError, SID] = await this._getUniqueSID()
-            this.emit('error', 'SessionStore.create() SID_GEN_ERROR:', SIDError)
-            if (SIDError) return ['SID_GEN_ERROR', undefined]
-
+            if (SIDError) {
+                this.emit('error', 'SessionStore.create() SID_GEN_ERROR:', SIDError)
+                return [SIDError, undefined]
+            }
+            
             const created = new Date().toISOString()
             const session: SessionEntry = {
                 name: account.name,
                 uuid: account.uuid,
                 root: account.root,
-                elevated: false,
                 createdISO: created,
                 updatedISO: created,
                 type: long ? 'long' : 'short'
@@ -137,7 +134,7 @@ export class SessionStore extends EventEmitter<Record<LogLevel, any[]>> implemen
             if (!doPasswordsMatch) return "ERR_BAD_PASS"
 
             this.emit('notice', `SessionStore.elevate() call successful | SID:${sid.slice(0, 10)}...${sid.slice(-10)} user:${account.name}`)
-            session.elevated = true
+            session.type = 'elevated'
 
         } 
         catch (error) {
@@ -151,7 +148,7 @@ export class SessionStore extends EventEmitter<Record<LogLevel, any[]>> implemen
      * @param sid Session ID
      * @returns boolean
      */
-    public renew(sid: string) {
+    public renew(sid: string): SessionEntry | undefined {
 
         const session = this.cache.get(sid)
         if (!session) return undefined
